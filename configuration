@@ -1,0 +1,63 @@
+#Configure a ethernet or wireless interfaces to use as WAN interfaces 
+
+/interface ethernet
+set [ find default-name=ether1 ] comment="CONECTED TO WAN1" speed=100Mbps
+set [ find default-name=ether2 ] comment="CONECTED TO WAN2" speed=100Mbps
+
+
+#Configure DHCP Client to gather WAN IP from WAN Interface
+
+/ip dhcp-client
+add add-default-route=no dhcp-options=hostname,clientid disabled=no interface=ether1 use-peer-dns=no use-peer-ntp=no
+exitadd add-default-route=no dhcp-options=hostname,clientid disabled=no interface=ether2 use-peer-dns=no use-peer-ntp=no
+
+#Configure routes to WAN Gateways
+#My Primary WAN Link has a gateway IP 192.168.0.1
+#My Secundary WAN Link has a gateway IP 192.168.1.1
+
+/ip route
+#This is the route that make a load balance for the two links
+add check-gateway=ping comment=LOAD1 distance=5 gateway=192.168.0.1,192.168.1.1
+
+#This is the route to use only WAN 1
+add check-gateway=ping comment=LOAD2 distance=9 gateway=192.168.0.1
+
+#This is the route to use only WAN 2
+add check-gateway=ping comment=LOAD3 distance=10 gateway=192.168.1.1
+
+#To test your links , you must create static route for two different IP Address to use with netwatch tool.
+add comment="Route to DNS from link 1" distance=1 dst-address=1.0.0.1/32 gateway=192.168.0.1
+add comment="Route to DNS from link 2" distance=1 dst-address=1.1.1.1/32 gateway=192.168.1.1
+
+
+#Configure netwatch to test your links using IPs configured in static route.
+/tool netwatch
+add comment=WAN1 
+    down-script=":log info \"Link WAN1 status: \$wan1\"; ip route disable [find comment=\"LOAD2\"];" 
+    host=1.1.1.1 interval=3s timeout=300ms 
+    up-script=":log info \"Link WAN1 status: \$wan1\";ip route enable [find comment=\"LOAD2\"];"
+    
+add comment=WAN2 
+    down-script=":log info \"Link WAN2 status: \$wan2\"; ip route disable [find comment=\"LOAD3\"];" 
+    host=1.0.0.1 interval=3s timeout=300ms 
+    up-script=":log info \"Link WAN2 status: \$wan2\";ip route enable [find comment=\"LOAD3\"];"
+
+#Configure a script to test if your teo links is online to activate Load Balance
+/system script
+add dont-require-permissions=no name=LoadBalance owner=admin policy=\
+    ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon source=":global wan2;\r\
+    \n:global wan1;\r\
+    \n:if (\$wan1=\"up\" and \$wan2=\"up\") do={/ip route enable [find comment=\"LOAD1\"];} else={/ip route\
+    \_disable [find comment=\"LOAD1\"];}"
+
+#Configure scheduler to run Load Balance script and to define the wan1 and wan2 global variables.
+/system scheduler
+add interval=2s name="Link LoadBalancer" on-event=LoadBalance policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon start-date=nov/10/2019 start-time=00:33:45
+add interval=2s name=VerifyWAN1 on-event=":global wan1  [/tool netwatch get [find comment=\"WAN1\"] status]" policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon start-date=nov/10/2019 start-time=01:02:36
+add interval=2s name=VerifyWAN2 on-event=":global wan2  [/tool netwatch get [find comment=\"WAN2\"] status]" policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon start-date=nov/10/2019 start-time=01:02:36
+
+
+
+    
+
+
